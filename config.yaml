@@ -1,0 +1,3 @@
+DATA_SRC: "data/_chat.txt"
+PREPROCESSED_DATA_DEST: "data/preprocessed_data"
+FRIEND: "Shahmeer"
