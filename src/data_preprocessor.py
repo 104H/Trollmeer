@@ -1,15 +1,15 @@
-import os
-import re
 import json
+import re
+
 import yaml
 
 preprocessed_data = {
-    "day" : [],
-    "month" : [],
-    "year" : [],
-    "hour" : [],
-    "minute" : [],
-    "message" : [],
+    "day": [],
+    "month": [],
+    "year": [],
+    "hour": [],
+    "minute": [],
+    "message": [],
 }
 
 # obtain data source and friend's name from config
@@ -18,6 +18,7 @@ with open("config.yaml", "r") as config_file:
 
     data_src = config["DATA_SRC"]
     friends_name = config["FRIEND"]
+    data_destination = config["PREPROCESSED_DATA_DEST"]
 
 # traverse file by line
 with open(data_src) as data:
@@ -27,21 +28,21 @@ with open(data_src) as data:
         # filter by `in` because it is faster than regex
         if friends_name in line:
             # extract date and message using regex
-            
+
             # whatsapp format
             # [DD.MM.YY, HH:MM:SS] ~ SENDER_NAME: MSG
             pattern = r"(\d{2})\.(\d{2})\.(\d{2}), (\d{2}):(\d{2}).+\: (.+)"
             matched_data = re.search(pattern, line)
 
             try:
-                preprocessed_data["day"].append( matched_data.group(1) )
-                preprocessed_data["month"].append( matched_data.group(2) )
-                preprocessed_data["year"].append( matched_data.group(3) )
-                preprocessed_data["hour"].append( matched_data.group(4) )
-                preprocessed_data["minute"].append( matched_data.group(5) )
-                preprocessed_data["message"].append( matched_data.group(6) )
-            except:
-                pass
+                preprocessed_data["day"].append(matched_data.group(1))
+                preprocessed_data["month"].append(matched_data.group(2))
+                preprocessed_data["year"].append(matched_data.group(3))
+                preprocessed_data["hour"].append(matched_data.group(4))
+                preprocessed_data["minute"].append(matched_data.group(5))
+                preprocessed_data["message"].append(matched_data.group(6))
+            except AttributeError:
+                print("Regex did not apply to line: ", line)
 
-with open(config["PREPROCESSED_DATA_DEST"], "w") as file:
+with open(data_destination, "w") as file:
     json.dump(preprocessed_data, file, indent=4)
