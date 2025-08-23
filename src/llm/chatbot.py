@@ -83,9 +83,10 @@ class ChatBot:
                     print("Assistant:", last_msg.content)
 
     def interactor(self):
+        print("Type quit or q to close the conversation.")
+
         # infinite loop for recieving input
         while True:
-            print("Type quit or q to close the conversation.")
             # recieve typed input
             user_input = input("Your message: ")
 
