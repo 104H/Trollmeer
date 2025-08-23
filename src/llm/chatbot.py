@@ -3,6 +3,7 @@ from typing import Annotated
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage
 from langchain_tavily import TavilySearch
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -25,6 +26,9 @@ class ChatBot:
 
     # tools for the model
     tools = [TavilySearch(max_results=2, topic="general")]
+
+    # the memory of the llm to maintain state
+    memory = InMemorySaver()
 
     def __init__(self):
         # bind search tool with llm
@@ -55,17 +59,21 @@ class ChatBot:
         # node chatbot connects to the end othe graph
         self.graph_builder.add_edge("chatbot", END)
 
+        # add the memory saver and
         # compile the graph
-        self.graph = self.graph_builder.compile()
+        self.graph = self.graph_builder.compile(checkpointer=self.memory)
 
     # interactive graph streamer
     def stream_graph_updates(self, user_input: str):
+        # use one thread for maintaining state
+        config = {"configurable": {"thread_id": "1"}}
+
         # a graph stream is given a dictionary with user role
         # and the message the user sent
         graph_input = {"messages": [{"role": "user", "content": user_input}]}
 
         # send input to the graph
-        for event in self.graph.stream(graph_input):
+        for event in self.graph.stream(graph_input, config):
             for value in event.values():
                 last_msg = value["messages"][-1]
 
