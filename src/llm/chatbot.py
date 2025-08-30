@@ -1,12 +1,17 @@
-from typing import Annotated
+from typing import List
 
 from langchain.chat_models import init_chat_model
+from langchain_community.document_loaders import JSONLoader
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_openai import OpenAIEmbeddings
 from langchain_tavily import TavilySearch
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.graph import START, StateGraph
+from langgraph.prebuilt import ToolNode
+from prompttemplate import custom_rag_prompt
 from typing_extensions import TypedDict
 
 
@@ -14,7 +19,22 @@ from typing_extensions import TypedDict
 # the state here is in the context of a state machine
 # as in theory of computation
 class State(TypedDict):
-    messages: Annotated[list, add_messages]
+    question: str
+    context: List[Document]
+    answer: str
+
+
+loader = JSONLoader(
+    file_path="data/preprocessed_data", jq_schema=".messages", text_content=False
+)
+
+# the prompt is pulled from the openai repository
+prompt = custom_rag_prompt
+
+# text embeddings
+embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+# store the emdeddings in a vector store
+vector_store = InMemoryVectorStore(embeddings)
 
 
 class ChatBot:
@@ -30,6 +50,9 @@ class ChatBot:
     # the memory of the llm to maintain state
     memory = InMemorySaver()
 
+    # load the chat data
+    data = loader.load()
+
     def __init__(self):
         # bind search tool with llm
         self.llm = self.llm.bind_tools(self.tools)
@@ -43,25 +66,33 @@ class ChatBot:
         def query(state: State):
             return {"messages": [self.llm.invoke(state["messages"])]}
 
-        # first arg is the name of the bot
-        # second arg is the function to be called
-        self.graph_builder.add_node("chatbot", query)
+        # add a retrieve and generate sequence for rag
+        self.graph_builder.add_sequence([self.retrieve, self.generate])
 
         # Start point connects to the chatbot
-        self.graph_builder.add_edge(START, "chatbot")
+        self.graph_builder.add_edge(START, "retrieve")
 
         # add a conditional end to the search tool
-        self.graph_builder.add_conditional_edges("chatbot", tools_condition)
+        # self.graph_builder.add_conditional_edges("retrieve", tools_condition)
 
         # send the tool output back to the llm to process it into natural lang
-        self.graph_builder.add_edge("tools", "chatbot")
+        # self.graph_builder.add_edge("tools", "retrieve")
 
         # node chatbot connects to the end othe graph
-        self.graph_builder.add_edge("chatbot", END)
+        # self.graph_builder.add_edge("generate", END)
 
         # add the memory saver and
         # compile the graph
         self.graph = self.graph_builder.compile(checkpointer=self.memory)
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=30,  # chunk size (characters)
+            chunk_overlap=6,  # chunk overlap (characters)
+            add_start_index=True,  # track index in original document
+        )
+        # apply the above splitter on the data
+        all_splits = text_splitter.split_documents(self.data)
+        self.document_ids = vector_store.add_documents(documents=all_splits)
 
     # interactive graph streamer
     def stream_graph_updates(self, user_input: str):
@@ -97,3 +128,17 @@ class ChatBot:
 
             # if the conversation was not ended, input the text to the model
             self.stream_graph_updates(user_input)
+
+    def retrieve(self, state: State):
+        """Retrieve docs from the vectors store"""
+        retrieved_docs = vector_store.similarity_search(state["question"])
+        return {"context": retrieved_docs}
+
+    def generate(self, state: State):
+        """Generate a response using the docs"""
+        docs_content = "\n\n".join(doc.page_content for doc in state["context"])
+        messages = prompt.invoke(
+            {"question": state["question"], "context": docs_content}
+        )
+        response = self.llm.invoke(messages)
+        return {"answer": response.content}
